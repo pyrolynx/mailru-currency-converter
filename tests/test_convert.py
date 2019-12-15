@@ -45,7 +45,7 @@ def storage(redis):
 
     return store_exchange_rate
 
-@pytest.mark.asyncio
+
 async def test_currency_convert(api_client: TestClient, exchange_rate: ExchangeRate, storage):
     amount = round(random.random() * 1000, 2)
     async with storage(exchange_rate):
@@ -56,3 +56,20 @@ async def test_currency_convert(api_client: TestClient, exchange_rate: ExchangeR
         response_json = await response.json()
         assert response_json['status'] == 'ok'
         assert response_json['result'] == round(amount * exchange_rate.value, 2)
+
+
+@pytest.mark.parametrize('upd_params', [{'from': 'FOO'}, {'to': 'BAR'}, {'from': 'FOO', 'to': 'BAR'}])
+async def test_currency_convert__unknown_currency(api_client: TestClient, exchange_rate: ExchangeRate, storage,
+                                                  upd_params: dict):
+    amount = round(random.random() * 1000, 2)
+    params = {
+        'from': exchange_rate._from,
+        'to': exchange_rate._to,
+        'amount': str(amount)
+    }
+    params.update(upd_params)
+    async with storage(exchange_rate):
+        response = await api_client.get('/convert', params=params)
+        response_json = await response.json()
+        assert response_json['status'] == 'error'
+
