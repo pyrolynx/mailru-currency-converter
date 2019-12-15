@@ -15,6 +15,7 @@ async def prepare_shutdown(app: web.Application):
 
 def get_app() -> web.Application:
     app = web.Application()
+    app.middlewares.append(views.response_handler)
     app.router.add_get('/convert', views.convert)
     app.router.add_post('/database', views.database)
     app.on_startup.append(prepare_startup)

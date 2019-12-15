@@ -1,30 +1,36 @@
+import marshmallow
 from aiohttp import web
 
-from application import storage
+from application import storage, schemas
 
 
-async def convert(request: web.Request) -> web.Response:
-    currency_from = request.query.get('from')
-    currency_to = request.query.get('to')
-    amount = request.query.get('amount')
+@web.middleware
+async def response_handler(request: web.Request, handler) -> web.Response:
     try:
-        amount = float(amount)
-    except ValueError:
-        raise web.HTTPBadRequest(reason='Query arg `amount` should be number')
+        return web.json_response({"status": "ok", "result": await handler(request)})
+    except marshmallow.ValidationError as e:
+        return web.json_response({'status': 'error', 'message': str(e)}, status=400)
+    except Exception as e:
+        return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
-    if not all((currency_from, currency_to)):
-        raise web.HTTPBadRequest(reason='Query args `from` and `to` required')
 
+async def convert(request: web.Request) -> dict:
+    data = schemas.ConvertSchema().load(request.query)
+    currency_from = data['currency_from']
+    currency_to = data['currency_to']
     try:
         exchange_rate = await storage.get_exchange_rate(currency_from, currency_to)
     except ValueError:
-        raise web.HTTPNotFound(reason=f'Exchange rate from `{currency_from}` to `{currency_to}` not found')
-    result = round(exchange_rate * amount, 2)
-    return web.json_response({'from': currency_from, 'to': currency_to, 'amount': amount, 'result': result})
+        raise Exception(f'Exchange rate from `{currency_from}` to `{currency_to}` not found')
+    result = round(exchange_rate * data['amount'], 2)
+    return result
 
 
-async def database(request: web.Request) -> web.Response:
-    data = await request.json()
-    merge = bool(int(request.query.get('merge', '1')))
+async def database(request: web.Request) -> bool:
+    data = schemas.ExchangeRateSchema().load(await request.json(), many=True)
+    merge = request.query.get('merge')
+    if merge not in ('0', '1'):
+        raise Exception('arg `merge` can be set to 0 or 1')
+    merge = bool(int(merge))
     await storage.update_exchange_rates(data, merge)
-    return web.HTTPAccepted()
+    return True

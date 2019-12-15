@@ -24,8 +24,8 @@ async def get_exchange_rate(currency_from: str, currency_to: str) -> float:
 async def update_exchange_rates(data: list, merge: bool = True):
     with (await redis) as conn:
         transaction = conn.multi_exec()
-        if merge:
+        if not merge:
             transaction.flushdb()
         for exchange_rate in data:
-            transaction.set(f'{exchange_rate["from"]}:{exchange_rate["to"]}', exchange_rate["value"])
+            transaction.set(f'{exchange_rate["from"]}:{exchange_rate["to"]}', float(exchange_rate["value"]))
         await transaction.execute()
