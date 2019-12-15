@@ -1,6 +1,5 @@
 import contextlib
 import random
-from collections import namedtuple
 
 import pytest
 from aiohttp.test_utils import TestClient
@@ -46,6 +45,14 @@ def storage(redis):
     return store_exchange_rate
 
 
+@pytest.fixture
+def redis_get_exchange_rate(redis):
+    async def get_exchange_rate(rate):
+        with (await redis) as conn:
+            return await conn.get(f'{rate._from}:{rate._to}')
+    return get_exchange_rate
+
+
 async def test_currency_convert(api_client: TestClient, exchange_rate: ExchangeRate, storage):
     amount = round(random.random() * 1000, 2)
     async with storage(exchange_rate):
@@ -53,6 +60,7 @@ async def test_currency_convert(api_client: TestClient, exchange_rate: ExchangeR
             'from': exchange_rate._from,
             'to': exchange_rate._to,
             'amount': str(amount)})
+        assert response.status == 200
         response_json = await response.json()
         assert response_json['status'] == 'ok'
         assert response_json['result'] == round(amount * exchange_rate.value, 2)
@@ -70,6 +78,27 @@ async def test_currency_convert__unknown_currency(api_client: TestClient, exchan
     params.update(upd_params)
     async with storage(exchange_rate):
         response = await api_client.get('/convert', params=params)
+        assert response.status == 400
         response_json = await response.json()
         assert response_json['status'] == 'error'
 
+
+async def test_database_store(api_client: TestClient):
+    rates = [ExchangeRate() for x in range(4)]
+    response = await api_client.post('/database', params={'merge': 1}, json=rates)
+    assert response.status == 200
+    response_json = await response.json()
+    assert response_json['status'] == 'ok'
+    assert response_json['result'] == True
+
+
+async def test_database_store_drop_old_keys(api_client: TestClient, exchange_rate: ExchangeRate, storage,
+                                            redis_get_exchange_rate):
+    async with storage(exchange_rate):
+        new = ExchangeRate()
+        response = await api_client.post('/database', params={'merge': 0}, json=[new])
+        assert response.status == 200
+        response_json = await response.json()
+        assert response_json['status'] == 'ok'
+        assert response_json['result'] == True
+        assert await redis_get_exchange_rate(exchange_rate) is None
